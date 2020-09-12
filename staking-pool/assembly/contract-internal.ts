@@ -69,7 +69,7 @@ export function initializeState(owner_id: AccountId,
 
     //assert(env.isValidAccountID(owner_id), "The owner account ID is invalid")
     reward_fee_fraction.assertValid()
-
+    if (DEBUG) logging.log("Context.accountLockedBalance="+Context.accountLockedBalance.toString())
     assert(Context.accountLockedBalance == u128.Zero, "The staking pool shouldn't be staking at the initialization")
     let account_balance = Context.accountBalance
     assert(account_balance > STAKE_SHARE_PRICE_GUARANTEE_FUND, "Account balance too low")

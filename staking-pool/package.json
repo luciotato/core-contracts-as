@@ -3,6 +3,6 @@
   "name": "staking-pool",
   "license": "MIT",
   "devDependencies": {
-    "near-sdk-as": "^2.0.0-next.2"
+    "near-sdk-as": "^2.0.0-next.3"
   }
 }

@@ -1,5 +1,5 @@
-import { Runtime, Account, stateSize } from "near-sdk-as/runtime";
-import { DEFAULT_GAS } from "near-sdk-as/runtime/dist/types";
+import { Runtime, Account, stateSize } from "near-sdk-simulator";
+import { DEFAULT_GAS } from "near-sdk-simulator/dist/types";
 
 
 let runtime: Runtime;

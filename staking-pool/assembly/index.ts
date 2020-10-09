@@ -105,3 +105,8 @@ export function get_staking_key(): string {
 export function get_reward_fee_fraction(): RewardFeeFraction {
     return contract.reward_fee_fraction
 }
+
+/// Returns the current reward fee as a fraction.
+export function get_owner_id(): string {
+    return contract.owner_id
+}

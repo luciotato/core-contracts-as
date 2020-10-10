@@ -13,5 +13,5 @@ var contractAccountFile = path.join("neardev", "dev-account");
 var contractAccount = fs.readFileSync(contractAccountFile).toString();
 spawn_1.view(contractAccount, "get_owner_id");
 spawn_1.view(contractAccount, "get_reward_fee_fraction");
-spawn_1.call(contractAccount, "deposit", "--amount", "1");
-spawn_1.call(contractAccount, "withdraw_all");
+spawn_1.call(contractAccount, "deposit", "--amount", "1","--accountId","lucio.testnet");
+spawn_1.call(contractAccount, "withdraw_all","--accountId","lucio.testnet");

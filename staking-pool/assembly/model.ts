@@ -10,6 +10,7 @@ export type NumStakeShares = u128;
 //
 // client account state persisted into a map
 //
+//@ts-ignore
 @nearBindgen
 export class ClientAccountState {
 
@@ -36,6 +37,7 @@ export function isEmpty(acc:ClientAccountState): boolean {
 
 
 /// Represents an account structure readable by humans.
+//@ts-ignore
 @nearBindgen
 export class HumanReadableAccount {
   account_id: AccountId = ""
@@ -53,6 +55,7 @@ export class HumanReadableAccount {
   }
 }
 
+//@ts-ignore
 @nearBindgen
 export class RewardFeeFraction {
   numerator: i32

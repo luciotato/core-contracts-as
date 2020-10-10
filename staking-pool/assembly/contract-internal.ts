@@ -1,7 +1,8 @@
 import { Context, logging, PersistentUnorderedMap, storage, u128, base58 } from "near-sdk-as"
+//import { promiseConnectCallBack } from "./extra-sdk"
 import { ClientAccountState, NumStakeShares, RewardFeeFraction, EpochHeight, AccountId, Balance, HumanReadableAccount, isEmpty } from "./model"
 
-const DEBUG = 1
+const DEBUG=1
 
 /// The amount of yocto NEAR the contract dedicates to guarantee that the "share" price never
 /// decreases. It's used during rounding errors for share -> amount conversions.
@@ -28,7 +29,8 @@ const NUM_EPOCHS_TO_UNLOCK: EpochHeight = 4;
 //@global
 var cache_ClientId: string
 //@global
-var cache_AccountInfo: ClientAccountState | null
+var cache_AccountInfo: ClientAccountState|null
+
 //@global
 var createdState: StakingContractState
 
@@ -48,17 +50,27 @@ export function getStateFromStorage(): StakingContractState {
         if (DEBUG) logging.log("*** NO STATE - CREATING")
         createdState = new StakingContractState()
     }
-    if (DEBUG) logging.log("state, " + createdState.persistentAccountsMap.length.toString() + " accounts")
+    if (DEBUG) logging.log("state, "+createdState.persistentAccountsMap.length.toString()+" accounts")
     return createdState
 }
 
 /**
+ * global variable. Set it only if you're sure the contract state 
+ * was not modified, in order to skip the state storage operation
+ */
+var cleanState: boolean = false
+/**
  * persist state when changes are made
  */
+//@ts-ignore
 @nearBindgen
 export function saveState(): void {
-    if (DEBUG) logging.log("saving state, " + createdState.persistentAccountsMap.length.toString() + " accounts")
-    storage.set<StakingContractState>("STATE", createdState)
+    if (DEBUG) logging.log("saveState. clean? "+cleanState.toString())
+    if (!cleanState) {
+        logging.log("saving state, "+createdState.persistentAccountsMap.length.toString()+" accounts")
+        storage.set<StakingContractState>("STATE", createdState)
+        if (DEBUG) logging.log("after storage set STATE")
+    }
     if (DEBUG) logging.log("end saveState")
 }
 
@@ -72,12 +84,12 @@ export function initializeState(owner_id: AccountId,
     if (DEBUG) logging.log("Context.accountLockedBalance="+Context.accountLockedBalance.toString())
     assert(Context.accountLockedBalance == u128.Zero, "The staking pool shouldn't be staking at the initialization")
     let account_balance = Context.accountBalance
-    assert(account_balance > STAKE_SHARE_PRICE_GUARANTEE_FUND, "Account balance too low")
+    assert(account_balance>STAKE_SHARE_PRICE_GUARANTEE_FUND, "Account balance too low")
     //@ts-ignore
     let total_staked_balance: Balance = account_balance - STAKE_SHARE_PRICE_GUARANTEE_FUND
 
     if (!createdState) createdState = new StakingContractState()
-
+    
     createdState.owner_id = owner_id
     createdState.stake_public_key_u8Arr = base58.decode(stake_public_key)
     createdState.reward_fee_fraction = reward_fee_fraction
@@ -95,6 +107,7 @@ export function initializeState(owner_id: AccountId,
  * before any function call
  * 
  */
+//@ts-ignore
 @nearBindgen
 export class StakingContractState {
     /// The account ID of the owner who's running the staking validator node.
@@ -136,8 +149,7 @@ export class StakingContractState {
     //------------------
     // Internal Methods 
     //------------------
-
-        /** 
+    /** 
      * Restakes the current `total_staked_balance` into the protocol
      *  */
     restake(): void {
@@ -158,19 +170,15 @@ export class StakingContractState {
         //     "on_stake_action", new EmptyArgs(), ON_STAKE_ACTION_GAS)
     }
 
-    /// Returns the number of "stake" shares rounded down corresponding to the given staked balance
-    /// amount.
-    ///
-    /// price = total_staked / total_shares
-    /// Price is fixed
-    /// (total_staked + amount) / (total_shares + num_shares) = total_staked / total_shares
-    /// (total_staked + amount) * total_shares = total_staked * (total_shares + num_shares)
-    /// amount * total_shares = total_staked * num_shares
-    /// num_shares = amount * total_shares / total_staked
-    num_shares_from_staked_amount_rounded_down(amount: Balance): NumStakeShares {
-        assert(this.total_staked_balance > u128.Zero, "The total staked balance can't be 0")
-        //@ts-ignore
-        return this.total_stake_shares * amount / this.total_staked_balance
+
+    /**
+     * execute stake(0) on this contract/account
+     * via account.stake(0)
+     * Stop staking on the validator's public key
+     */
+    stake_zero(): void {
+//        ContractPromiseBatch.create(Context.contractName)
+//            .stake(u128.from(0), this.stake_public_key_u8Arr)
     }
 
     /**
@@ -181,20 +189,28 @@ export class StakingContractState {
 
         if (clientAccountId != cache_ClientId) {
             // if not cached
-            if (DEBUG) logging.log('not cached ' + clientAccountId + " call this.persistentAccountsMap.contains")
+            if (DEBUG) logging.log('not cached '+clientAccountId+" call this.persistentAccountsMap.contains" )
             const result = this.persistentAccountsMap.contains(clientAccountId)
             if (DEBUG) logging.log("this.persistentAccountsMap.contains? " + result.toString())
-            cache_AccountInfo = this.persistentAccountsMap.get(clientAccountId)
+            cache_AccountInfo = this.persistentAccountsMap.get(clientAccountId) 
             if (cache_AccountInfo == null) { //new client
                 if (DEBUG) logging.log("cache_AccountInfo == null => NEW CLIENT")
                 cache_AccountInfo = new ClientAccountState()
             }
             else {
-                if (DEBUG) logging.log("account " + clientAccountId + " unstaked:" + (cache_AccountInfo as ClientAccountState).unstaked.toString())
+                if (DEBUG) logging.log("account " + clientAccountId+" unstaked:"+(cache_AccountInfo as ClientAccountState).unstaked.toString())
             }
             cache_ClientId = clientAccountId
         }
         return cache_AccountInfo as ClientAccountState
+    }
+
+    /**
+     * gets an HumanReadableAccount info for clientAccountId 
+     * @param clientAccountId 
+     */
+    getClientHRA(clientAccountId: AccountId): HumanReadableAccount {
+        return new HumanReadableAccount(clientAccountId, this.getClientAccount(clientAccountId))
     }
 
     /**
@@ -216,14 +232,6 @@ export class StakingContractState {
     }
 
     /**
-     * gets an HumanReadableAccount info for clientAccountId 
-     * @param clientAccountId 
-     */
-    getClientHRA(clientAccountId: AccountId): HumanReadableAccount {
-        return new HumanReadableAccount(clientAccountId, this.getClientAccount(clientAccountId))
-    }
-
-    /**
      * client Context.predecessor is depositing Context.attachedDeposit into their internal account
      */
     clientDeposit(): u128 {
@@ -233,15 +241,159 @@ export class StakingContractState {
         if (DEBUG) logging.log("const amount = Context.attachedDeposit")
         const amount = Context.attachedDeposit
         if (DEBUG) logging.log(" amount = "+amount.toString())
+        //@ts-ignore
         accountInfo.unstaked += amount
         if (DEBUG) logging.log("this.saveClientAccount(clientId, accountInfo) "+accountInfo.unstaked.toString())
         this.saveClientAccount(clientId, accountInfo)
         if (DEBUG) logging.log("this.last_total_balance += amount")
-        this.last_total_balance += amount
+        //this.last_total_balance += amount
+        //this.last_total_balance -= amount
         if (DEBUG) logging.log("this.last_total_balance = "+this.last_total_balance.toString())
         logging.log("@" + clientId + " deposited " + amount.toString() + ". New unstaked balance is " + accountInfo.unstaked.toString())
 
         return amount
+    }
+
+    clientWithdraw(amount: Balance): void {
+        assert(amount > u128.Zero, "Withdrawal amount should be positive")
+        const clientId = Context.predecessor
+        if (DEBUG) logging.log("clientWithdraw "+clientId+ " "+amount.toString())
+        let accountInfo = this.getClientAccount(clientId)
+        assert(accountInfo.unstaked >= amount, "Not enough unstaked balance to withdraw")
+        if (DEBUG) logging.log("accountInfo.unstaked_available_epoch_height "+accountInfo.unstaked_available_epoch_height.toString())
+        if (DEBUG) logging.log("Context.epochHeight "+Context.epochHeight.toString())
+        assert(accountInfo.unstaked_available_epoch_height <= Context.epochHeight, "The unstaked balance is not yet available due to unstaking delay")
+        //@ts-ignore
+        accountInfo.unstaked -= amount
+        this.saveClientAccount(clientId, accountInfo)
+
+        logging.log("@" + clientId + " withdrawing " + amount.toString() + ". New unstaked balance is " + accountInfo.unstaked.toString())
+        // call transfer from clientId into this contract
+        //ContractPromiseBatch.create(clientId).transfer(amount)
+        //@ts-ignore
+        this.last_total_balance -= amount
+    }
+
+    /// Returns the number of "stake" shares rounded down corresponding to the given staked balance
+    /// amount.
+    ///
+    /// price = total_staked / total_shares
+    /// Price is fixed
+    /// (total_staked + amount) / (total_shares + num_shares) = total_staked / total_shares
+    /// (total_staked + amount) * total_shares = total_staked * (total_shares + num_shares)
+    /// amount * total_shares = total_staked * num_shares
+    /// num_shares = amount * total_shares / total_staked
+    num_shares_from_staked_amount_rounded_down(amount: Balance): NumStakeShares {
+        assert(this.total_staked_balance > u128.Zero, "The total staked balance can't be 0")
+        //@ts-ignore
+        return this.total_stake_shares * amount / this.total_staked_balance
+    }
+
+    /// Returns the staked amount rounded down corresponding to the given number of "stake" shares.
+    staked_amount_from_num_shares_rounded_down(num_shares: NumStakeShares): Balance {
+        assert(this.total_stake_shares > u128.Zero, "The total number of stake shares can't be 0")
+        //make it portable by using u128.add/sub/mul/div
+        return u128.div(u128.mul(this.total_staked_balance,num_shares),this.total_stake_shares)
+        //return this.total_staked_balance * num_shares / this.total_stake_shares
+    }
+
+    /// Returns the number of "stake" shares rounded up corresponding to the given staked balance
+    /// amount.
+    ///
+    /// Rounding up division of `a / b` is done using `(a + b - 1) / b`.
+    num_shares_from_staked_amount_rounded_up(amount: Balance): NumStakeShares {
+        assert(this.total_staked_balance > u128.Zero, "The total staked balance can't be 0")
+        //make it portable by using u128.add/sub/mul/div
+        return u128.div(u128.add(u128.mul(this.total_stake_shares,amount),u128.sub(this.total_staked_balance,u128.One)),this.total_staked_balance)
+        //return (this.total_stake_shares * amount + this.total_staked_balance - u128.One) / this.total_staked_balance
+    }
+    /// Returns the staked amount rounded up corresponding to the given number of "stake" shares.
+    ///
+    /// Rounding up division of `a / b` is done using `(a + b - 1) / b`.
+    staked_amount_from_num_shares_rounded_up(num_shares: NumStakeShares): Balance {
+        assert(this.total_stake_shares > u128.Zero, "The total number of stake shares can't be 0")
+        //make it portable by using u128.add/sub/mul/div
+        return u128.div(u128.add(u128.mul(this.total_staked_balance,num_shares),u128.sub(this.total_stake_shares,u128.One)),this.total_stake_shares)
+        //return (this.total_staked_balance * num_shares + this.total_stake_shares - u128.One) / this.total_stake_shares
+    }
+
+
+    clientStake(amount: Balance): void {
+
+        assert(amount > u128.Zero, "Staking amount should be positive")
+        let clientId = Context.predecessor
+        let accountInfo = this.getClientAccount(clientId)
+
+        // Calculate the number of "stake" shares that the account will receive 
+        //for staking the given amount.
+        let num_shares = this.num_shares_from_staked_amount_rounded_down(amount)
+        assert(num_shares > u128.Zero, 'The calculated number of "stake" shares received for staking should be positive')
+
+        // The amount of tokens the account will be charged from the unstaked balance.
+        // Rounded down to avoid overcharging the account to guarantee that the account can always
+        // unstake at least the same amount as staked.
+        let charge_amount = this.staked_amount_from_num_shares_rounded_down(num_shares)
+        assert(charge_amount > u128.Zero, "Invariant violation. Calculated staked amount must be positive, because \"stake\" share price should be at least 1")
+        assert(accountInfo.unstaked >= charge_amount, "Not enough unstaked balance to stake")
+        accountInfo.unstaked = u128.sub(accountInfo.unstaked, charge_amount)
+        accountInfo.stake_shares = u128.add(accountInfo.stake_shares,num_shares)
+        this.saveClientAccount(clientId, accountInfo)
+
+        // The staked amount that will be added to the total to guarantee the "stake" share price
+        // never decreases. The difference between `stake_amount` and `charge_amount` is paid
+        // from the allocated STAKE_SHARE_PRICE_GUARANTEE_FUND.
+        let stake_amount = this.staked_amount_from_num_shares_rounded_up(num_shares)
+        this.total_staked_balance = u128.add(this.total_staked_balance,stake_amount)
+        this.total_stake_shares = u128.add(this.total_stake_shares,num_shares)
+        logging.log("@" + clientId + " staking " + charge_amount.toString() +
+            ". Received " + num_shares.toString() + " new staking shares." +
+            " Total " + accountInfo.unstaked.toString() + " unstaked balance and " + accountInfo.stake_shares.toString() + " staking shares")
+        logging.log("Contract total staked balance is " + this.total_staked_balance.toString() +
+            ". Total number of shares " + this.total_stake_shares.toString())
+    }
+
+    clientUnstake(amount: u128): void {
+        //@ts-ignore
+        assert(amount > u128.Zero, "Unstaking amount should be positive")
+        let clientId = Context.predecessor
+        let accountInfo = this.getClientAccount(clientId)
+        //@ts-ignore
+        assert(this.total_staked_balance > u128.Zero, "The contract doesn't have staked balance")
+
+        // Calculate the number of shares required to unstake the given amount.
+        // NOTE: The number of shares the account will pay is rounded up.
+        let num_shares: u128 = this.num_shares_from_staked_amount_rounded_up(amount)
+        assert(num_shares > u128.Zero, 'Invariant violation. The calculated number of "stake" shares for unstaking should be positive')
+        assert(accountInfo.stake_shares >= num_shares, "Not enough staked balance to unstake")
+
+        // Calculating the amount of tokens the account will receive by unstaking the corresponding
+        // number of "stake" shares, rounding up.
+        let receive_amount = this.staked_amount_from_num_shares_rounded_up(num_shares)
+        assert(receive_amount > u128.Zero, "Invariant violation. Calculated staked amount must be positive, because \"stake\" share price should be at least 1")
+        accountInfo.stake_shares = u128.sub(accountInfo.stake_shares ,num_shares)
+        accountInfo.unstaked = u128.add(accountInfo.unstaked, receive_amount)
+        accountInfo.unstaked_available_epoch_height = Context.epochHeight + NUM_EPOCHS_TO_UNLOCK
+        this.saveClientAccount(clientId, accountInfo)
+
+        // The amount tokens that will be unstaked from the total to guarantee the "stake" share
+        // price never decreases. The difference between `receive_amount` and `unstake_amount` is
+        // paid from the allocated STAKE_SHARE_PRICE_GUARANTEE_FUND.
+        let unstake_amount = this.staked_amount_from_num_shares_rounded_down(num_shares)
+        this.total_staked_balance = u128.sub(this.total_staked_balance, unstake_amount)
+        this.total_stake_shares = u128.sub(this.total_stake_shares, num_shares)
+
+        logging.log("@" + clientId + " unstaking " + receive_amount.toString() + "." +
+            " Spent " + num_shares.toString() + " staking shares." +
+            " Total " + accountInfo.unstaked.toString() + " unstaked balance" +
+            " and " + accountInfo.stake_shares.toString() + " staking shares")
+
+        logging.log("Contract total staked balance is " + this.total_staked_balance.toString() + "." +
+            " Total number of shares " + this.total_staked_balance.toString())
+    }
+
+    /// Asserts that the method was called by the owner.
+    assertOwner(): void {
+        assert(Context.predecessor == this.owner_id, "Can only be called by the owner")
     }
 
     /**
@@ -304,23 +456,4 @@ export class StakingContractState {
         this.last_total_balance = total_balance
         return true
     }
-
-    clientWithdraw(amount: Balance): void {
-        assert(amount > u128.Zero, "Withdrawal amount should be positive")
-        const clientId = Context.predecessor
-        if (DEBUG) logging.log("clientWithdraw "+clientId+ " "+amount.toString())
-        let accountInfo = this.getClientAccount(clientId)
-        assert(accountInfo.unstaked >= amount, "Not enough unstaked balance to withdraw")
-        if (DEBUG) logging.log("accountInfo.unstaked_available_epoch_height "+accountInfo.unstaked_available_epoch_height.toString())
-        if (DEBUG) logging.log("Context.epochHeight "+Context.epochHeight.toString())
-        assert(accountInfo.unstaked_available_epoch_height <= Context.epochHeight, "The unstaked balance is not yet available due to unstaking delay")
-        accountInfo.unstaked -= amount
-        this.saveClientAccount(clientId, accountInfo)
-        logging.log("@" + clientId + " withdrawing " + amount.toString() + ". New unstaked balance is " + accountInfo.unstaked.toString())
-        // call transfer from clientId into this contract
-        //ContractPromiseBatch.create(clientId).transfer(amount)
-        //@ts-ignore
-        this.last_total_balance -= amount
-    }
-
 }
